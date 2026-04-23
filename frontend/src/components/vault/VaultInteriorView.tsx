@@ -18,7 +18,8 @@ interface Props {
   onClearAllMedia: () => Promise<void> | void;
   onRemoveMedia: (ids: string[]) => Promise<void> | void;
   onToggleStar: (mediaId: string) => Promise<void> | void;
-  onUploadMedia: (files: File[]) => Promise<void> | void;
+  onUploadMedia: (files: File[], onProgress?: (p: number) => void) => Promise<void> | void;
+  onRevokeAccess: () => void;
   theme: string;
   setTheme: (t: string) => void;
 }
@@ -33,9 +34,11 @@ export function VaultInteriorView({
   onRemoveMedia,
   onToggleStar,
   onUploadMedia,
+  onRevokeAccess,
   theme,
   setTheme,
 }: Props) {
+
   const [filter, setFilter] = useState<FilterOption>('all');
   const [sort] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -49,6 +52,7 @@ export function VaultInteriorView({
   const [settingsView, setSettingsView] = useState(false);
   const [shareView, setShareView] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
   const { showToast } = useToast();
 
   const filteredMedia = useMemo(() => {
@@ -80,6 +84,17 @@ export function VaultInteriorView({
     showToast('success', `${ids.length} item(s) removed`);
   }, [onRemoveMedia, showToast]);
 
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
+
+  const handleGlobalDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingGlobal(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setDroppedFiles(Array.from(e.dataTransfer.files));
+      setUploadView(true);
+    }
+  }, []);
+
   const counts = useMemo(() => ({
     all: vault.media.length,
     images: vault.media.filter(m => m.type === 'image').length,
@@ -98,12 +113,20 @@ export function VaultInteriorView({
     return () => window.removeEventListener('keydown', handler);
   }, [previewIndex, filteredMedia.length]);
 
+
   if (uploadView) {
-    return <UploadView onClose={() => setUploadView(false)} onUpload={async (files) => {
-      await onUploadMedia(files);
-      showToast('success', `${files.length} file(s) uploaded`);
-    }} />;
+    return <UploadView 
+      initialFiles={droppedFiles}
+      onClose={() => { setUploadView(false); setDroppedFiles([]); }} 
+      onUpload={async (files, onProgress) => {
+        await onUploadMedia(files, onProgress);
+        showToast('success', `${files.length} file(s) uploaded`);
+      }} 
+    />;
   }
+
+
+
 
   if (settingsView) {
     return <VaultSettingsView
@@ -112,7 +135,9 @@ export function VaultInteriorView({
       onClose={() => setSettingsView(false)}
       onDeleteAll={onClearAllMedia}
       onDestroyVault={onDeleteVault}
+      onRevokeAccess={onRevokeAccess}
     />;
+
   }
 
   if (shareView) {
@@ -171,8 +196,33 @@ export function VaultInteriorView({
   ];
 
   return (
-    <div className="flex flex-col h-screen bg-vault-bg">
+    <div 
+      className="flex flex-col h-screen bg-vault-bg relative"
+      onDragOver={e => { e.preventDefault(); setIsDraggingGlobal(true); }}
+      onDragLeave={e => {
+        // Only set false if we leave the main container
+        if (e.currentTarget === e.target) setIsDraggingGlobal(false);
+      }}
+      onDrop={handleGlobalDrop}
+    >
+      <AnimatePresence>
+        {isDraggingGlobal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[60] bg-vault-accent/10 backdrop-blur-sm flex items-center justify-center pointer-events-none"
+          >
+            <div className="p-8 border-2 border-dashed border-vault-accent bg-vault-bg/90 flex flex-col items-center gap-4">
+              <Upload size={48} className="text-vault-accent animate-bounce" />
+              <p className="text-xl font-bold text-vault-text">Drop files to upload</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Top bar */}
+
       <div className="flex-shrink-0 border-b border-vault-border">
         <div className="flex items-center gap-3 px-4 h-14">
           <button onClick={onLock} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
@@ -368,38 +418,33 @@ export function VaultInteriorView({
 }
 
 /* ============ Upload ============ */
-function UploadView({ onClose, onUpload }: { onClose: () => void; onUpload: (files: File[]) => void }) {
-  const [files, setFiles] = useState<File[]>([]);
+function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => void; onUpload: (files: File[], onProgress: (p: number) => void) => Promise<void>; initialFiles?: File[] }) {
+  const [files, setFiles] = useState<File[]>(initialFiles);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState<Record<string, number>>({});
+  const [globalProgress, setGlobalProgress] = useState(0);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = (newFiles: FileList | null) => {
+  const handleFiles = (newFiles: FileList | null | File[]) => {
     if (!newFiles) return;
-    setFiles(prev => [...prev, ...Array.from(newFiles)]);
+    const array = Array.isArray(newFiles) ? newFiles : Array.from(newFiles);
+    setFiles(prev => [...prev, ...array]);
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     setUploading(true);
-    const newProgress: Record<string, number> = {};
-    files.forEach(f => { newProgress[f.name] = 0; });
-    setProgress(newProgress);
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        const next = { ...prev };
-        let allDone = true;
-        Object.keys(next).forEach(key => {
-          if (next[key] < 100) {
-            next[key] = Math.min(100, next[key] + Math.random() * 30);
-            if (next[key] < 100) allDone = false;
-          }
-        });
-        if (allDone) { clearInterval(interval); setTimeout(() => { onUpload(files); onClose(); }, 400); }
-        return next;
+    setGlobalProgress(0);
+    try {
+      await onUpload(files, (p) => {
+        setGlobalProgress(p);
       });
-    }, 250);
+      onClose();
+    } catch (err) {
+      console.error(err);
+      setUploading(false);
+    }
   };
+
 
   return (
     <div className="flex flex-col h-screen bg-vault-bg">
@@ -437,7 +482,7 @@ function UploadView({ onClose, onUpload }: { onClose: () => void; onUpload: (fil
                   <p className="text-[10px] text-vault-muted">{(f.size / 1024 / 1024).toFixed(1)} MB</p>
                   {uploading && (
                     <div className="mt-1 h-0.5 bg-vault-border overflow-hidden">
-                      <div className="h-full bg-vault-text transition-all duration-200" style={{ width: `${progress[f.name] || 0}%` }} />
+                      <div className="h-full bg-vault-text transition-all duration-200" style={{ width: `${globalProgress}%` }} />
                     </div>
                   )}
                 </div>
@@ -446,7 +491,8 @@ function UploadView({ onClose, onUpload }: { onClose: () => void; onUpload: (fil
                     <X size={14} />
                   </button>
                 )}
-                {uploading && (progress[f.name] || 0) >= 100 && <Check size={14} className="text-vault-success" />}
+                {uploading && globalProgress >= 100 && <Check size={14} className="text-vault-success" />}
+
               </div>
             ))}
           </div>
@@ -470,18 +516,20 @@ function UploadView({ onClose, onUpload }: { onClose: () => void; onUpload: (fil
 }
 
 /* ============ Vault Settings ============ */
-function VaultSettingsView({ vault, onUpdate, onClose, onDeleteAll, onDestroyVault }: {
+function VaultSettingsView({ vault, onUpdate, onClose, onDeleteAll, onDestroyVault, onRevokeAccess }: {
   vault: Vault;
   onUpdate: (v: Vault) => Promise<void> | void;
   onClose: () => void;
   onDeleteAll: () => Promise<void> | void;
   onDestroyVault: () => Promise<void> | void;
+  onRevokeAccess: () => void;
 }) {
   const [name, setName] = useState(vault.name);
   const [confirmDelete, setConfirmDelete] = useState('');
   const [showDanger, setShowDanger] = useState(false);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [confirmDestroy, setConfirmDestroy] = useState(false);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
   const { showToast } = useToast();
 
   return (
@@ -501,6 +549,14 @@ function VaultSettingsView({ vault, onUpdate, onClose, onDeleteAll, onDestroyVau
           <button onClick={() => { void onUpdate({ ...vault, name }); showToast('success', 'Saved'); onClose(); }} className="w-full py-2.5 bg-vault-accent text-vault-bg text-sm font-medium hover:opacity-90 transition-opacity">
             Save
           </button>
+
+          <div className="pt-4 border-t border-vault-border">
+            <label className="text-xs font-medium text-vault-muted mb-1.5 block uppercase tracking-wider">Access management</label>
+            <button onClick={() => setConfirmRevoke(true)} className="w-full py-2.5 border border-vault-border text-vault-text text-xs hover:bg-vault-elevated transition-colors">
+              Remove from this device
+            </button>
+            <p className="text-[10px] text-vault-muted mt-2">This will remove the vault from your local storage. You will need the Vault ID and password to access it again.</p>
+          </div>
 
           <div className="pt-4 border-t border-vault-border">
             <button onClick={() => setShowDanger(!showDanger)} className="text-xs text-vault-muted hover:text-vault-danger transition-colors">
@@ -523,6 +579,16 @@ function VaultSettingsView({ vault, onUpdate, onClose, onDeleteAll, onDestroyVau
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmRevoke}
+        onOpenChange={setConfirmRevoke}
+        title="Remove from device?"
+        description="The vault will be removed from your local history, but it will NOT be deleted from the server. You can re-access it anytime with its ID and password."
+        confirmLabel="Remove Access"
+        onConfirm={() => { onRevokeAccess(); }}
+      />
+
 
       <ConfirmDialog
         open={confirmClearAll}

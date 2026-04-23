@@ -46,15 +46,38 @@ export const api = {
     return data.vault;
   },
 
-  async uploadMedia(vaultId: string, files: File[]): Promise<Vault> {
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
-    const data = await request<{ vault: Vault }>(`/api/vaults/${vaultId}/media`, {
-      method: "POST",
-      body: formData,
+  async uploadMedia(vaultId: string, files: File[], onProgress?: (percent: number) => void): Promise<Vault> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      files.forEach((file) => formData.append("files", file));
+
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      });
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            resolve(data.vault);
+          } catch (e) {
+            reject(new Error("Failed to parse response"));
+          }
+        } else {
+          reject(new Error(xhr.statusText || "Upload failed"));
+        }
+      });
+
+      xhr.addEventListener("error", () => reject(new Error("Network error")));
+      xhr.open("POST", `${API_BASE_URL}/api/vaults/${vaultId}/media`);
+      xhr.send(formData);
     });
-    return data.vault;
   },
+
 
   async toggleStar(vaultId: string, mediaId: string): Promise<Vault> {
     const data = await request<{ vault: Vault }>(`/api/vaults/${vaultId}/media/${mediaId}/star`, {
