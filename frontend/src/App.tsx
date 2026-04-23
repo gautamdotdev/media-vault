@@ -172,7 +172,9 @@ export default function App() {
                   return next;
                 });
                 navigate('/');
-              }} />} />
+              }} />}>
+                <Route path="m/:mediaId" element={<div />} />
+              </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

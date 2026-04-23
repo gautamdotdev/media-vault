@@ -5,8 +5,10 @@ import {
   CheckSquare, Square, FileImage, FileVideo, Check, MoreHorizontal,
   Copy, Eye, EyeOff, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
+import { MediaPreview } from './MediaPreview';
 import type { Vault, FilterOption, SortOption, ViewMode, MediaItem } from './types';
 import heic2any from 'heic2any';
 
@@ -136,6 +138,8 @@ export function VaultInteriorView({
   const [shareView, setShareView] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
+  const { mediaId } = useParams();
+  const navigate = useNavigate();
   const { showToast } = useToast();
 
   const isImage = (m: MediaItem) => m.type === 'image' || /\.(heic|heif|jpg|jpeg|png|gif|webp)$/i.test(m.name);
@@ -161,6 +165,35 @@ export function VaultInteriorView({
     }
     return items;
   }, [vault.media, filter, sort, searchQuery]);
+
+  // Sync preview index with mediaId in URL
+  useEffect(() => {
+    if (mediaId) {
+      const idx = filteredMedia.findIndex(m => m.id === mediaId);
+      if (idx !== -1) {
+        setPreviewIndex(idx);
+      } else {
+        // If not found in filtered list, try finding in all media
+        const allIdx = vault.media.findIndex(m => m.id === mediaId);
+        if (allIdx !== -1) {
+          // Reset filters to show the item
+          setFilter('all');
+          setSearchQuery('');
+          setPreviewIndex(allIdx);
+        }
+      }
+    } else {
+      setPreviewIndex(null);
+    }
+  }, [mediaId, filteredMedia, vault.media]);
+
+  const updatePreviewUrl = (idx: number | null) => {
+    if (idx !== null && filteredMedia[idx]) {
+      navigate(`/vault/${vaultId}/m/${filteredMedia[idx].id}`);
+    } else {
+      navigate(`/vault/${vaultId}`);
+    }
+  };
 
   const toggleStar = useCallback(async (id: string) => {
     await onToggleStar(id);
@@ -194,13 +227,13 @@ export function VaultInteriorView({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (previewIndex === null) return;
-      if (e.key === 'Escape') setPreviewIndex(null);
-      if (e.key === 'ArrowRight' && previewIndex < filteredMedia.length - 1) setPreviewIndex(previewIndex + 1);
-      if (e.key === 'ArrowLeft' && previewIndex > 0) setPreviewIndex(previewIndex - 1);
+      if (e.key === 'Escape') updatePreviewUrl(null);
+      if (e.key === 'ArrowRight' && previewIndex < filteredMedia.length - 1) updatePreviewUrl(previewIndex + 1);
+      if (e.key === 'ArrowLeft' && previewIndex > 0) updatePreviewUrl(previewIndex - 1);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [previewIndex, filteredMedia.length]);
+  }, [previewIndex, filteredMedia.length, navigate, vaultId]);
 
   if (uploadView) {
     return <UploadView 
@@ -229,43 +262,17 @@ export function VaultInteriorView({
   }
 
   if (previewIndex !== null && filteredMedia[previewIndex]) {
-    const item = filteredMedia[previewIndex];
     return (
-      <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center select-none" onClick={() => setPreviewIndex(null)}>
-        {previewIndex > 0 && (
-          <button
-            className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center text-white/40 hover:text-white/80 transition-colors"
-            onClick={e => { e.stopPropagation(); setPreviewIndex(previewIndex - 1); }}
-          >
-            <ChevronLeft size={28} />
-          </button>
-        )}
-        {previewIndex < filteredMedia.length - 1 && (
-          <button
-            className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center text-white/40 hover:text-white/80 transition-colors"
-            onClick={e => { e.stopPropagation(); setPreviewIndex(previewIndex + 1); }}
-          >
-            <ChevronRight size={28} />
-          </button>
-        )}
-
-        {isImage(item) && item.url ? (
-          <VaultImage
-            media={item}
-            className="max-h-full max-w-full object-contain"
-            onClick={(e: any) => e.stopPropagation()}
-          />
-        ) : (
-          <div className="text-center" onClick={e => e.stopPropagation()}>
-            <Play size={48} className="text-white/40 mx-auto" />
-            <p className="text-white/30 text-xs mt-3">{item.name}</p>
-          </div>
-        )}
-
-        <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/20 text-xs font-mono">
-          {previewIndex + 1} / {filteredMedia.length}
-        </span>
-      </div>
+      <MediaPreview
+        item={filteredMedia[previewIndex]}
+        onClose={() => updatePreviewUrl(null)}
+        onNext={() => updatePreviewUrl(previewIndex + 1)}
+        onPrev={() => updatePreviewUrl(previewIndex - 1)}
+        hasNext={previewIndex < filteredMedia.length - 1}
+        hasPrev={previewIndex > 0}
+        currentIndex={previewIndex}
+        totalCount={filteredMedia.length}
+      />
     );
   }
 
@@ -407,7 +414,7 @@ export function VaultInteriorView({
                     next.add(item.id);
                   }
                   return next;
-                }) : setPreviewIndex(idx)}
+                }) : updatePreviewUrl(idx)}
               >
                 <div className="aspect-square relative bg-vault-elevated">
                   {isImage(item) && item.url ? (
@@ -442,7 +449,7 @@ export function VaultInteriorView({
               <div
                 key={item.id}
                 className="flex items-center gap-3 px-4 py-3 border-b border-vault-border/40 cursor-pointer hover:bg-vault-elevated transition-colors"
-                onClick={() => setPreviewIndex(idx)}
+                onClick={() => updatePreviewUrl(idx)}
               >
                 <div className="w-10 h-10 overflow-hidden bg-vault-elevated flex-shrink-0">
                   {isImage(item) && item.url ? (
