@@ -164,7 +164,7 @@ export default function App() {
                   <AccessVaultView onBack={() => navigate('/')} onUnlock={handleOpenVault} onNavigate={(v) => navigate(`/${v}`)} vaults={vaults} />
                 </motion.div>
               } />
-              <Route path="/vault/:id" element={<VaultRouteWrapper vaults={vaults} onLock={handleLock} onUpdateVault={setVaults} rememberVault={rememberVault} theme={theme} setTheme={setTheme} knownVaultIds={knownVaultIds} setKnownVaultIds={setKnownVaultIds} setUnlockedPasswords={setUnlockedPasswords} onRevokeAccess={(id: string) => {
+              <Route path="/vault/:id" element={<VaultRouteWrapper vaults={vaults} onLock={handleLock} onUpdateVault={setVaults} theme={theme} setTheme={setTheme} setKnownVaultIds={setKnownVaultIds} setUnlockedPasswords={setUnlockedPasswords} onRevokeAccess={(id: string) => {
                 setKnownVaultIds(prev => prev.filter(vid => vid !== id));
                 setUnlockedPasswords(prev => {
                   const next = { ...prev };
@@ -173,6 +173,7 @@ export default function App() {
                 });
                 navigate('/');
               }} />} />
+
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </AnimatePresence>
@@ -182,7 +183,8 @@ export default function App() {
   );
 }
 
-function VaultRouteWrapper({ vaults, onLock, onUpdateVault, rememberVault, theme, setTheme, knownVaultIds, setKnownVaultIds, setUnlockedPasswords, onRevokeAccess }: any) {
+function VaultRouteWrapper({ vaults, onLock, onUpdateVault, theme, setTheme, setKnownVaultIds, setUnlockedPasswords, onRevokeAccess }: any) {
+
   const { id } = useParams();
   const navigate = useNavigate();
   const vault = vaults[id || ''];

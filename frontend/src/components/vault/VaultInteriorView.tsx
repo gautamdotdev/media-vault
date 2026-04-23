@@ -7,7 +7,91 @@ import {
 } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
-import type { Vault, FilterOption, SortOption, ViewMode } from './types';
+import type { Vault, FilterOption, SortOption, ViewMode, MediaItem } from './types';
+import heic2any from 'heic2any';
+
+function VaultImage({ media, className, onClick }: { media: MediaItem; className?: string; onClick?: (e: any) => void }) {
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!media.url) return;
+    
+    // Determine absolute URL
+    const isAbsolute = media.url.startsWith('http') || media.url.startsWith('blob:');
+    const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+    const fullUrl = isAbsolute ? media.url : `${apiBase}${media.url}`;
+
+    const isHeic = /\.(heic|heif)$/i.test(media.name);
+    
+    if (isHeic) {
+      console.log(`[VaultImage] Converting HEIC: ${media.name}`);
+      setLoading(true);
+      fetch(fullUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.blob();
+        })
+        .then(blob => {
+          console.log(`[VaultImage] Blob fetched, starting conversion for ${media.name}`);
+          return heic2any({ blob, toType: 'image/jpeg', quality: 0.7 });
+        })
+        .then(converted => {
+          const blobUrl = URL.createObjectURL(Array.isArray(converted) ? converted[0] : converted);
+          console.log(`[VaultImage] Conversion successful: ${blobUrl}`);
+          setDisplayUrl(blobUrl);
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error(`[VaultImage] HEIC conversion failed for ${media.name}:`, err);
+          setDisplayUrl(fullUrl);
+          setLoading(false);
+        });
+        
+      return () => {
+        if (displayUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(displayUrl);
+        }
+      };
+    } else {
+      setDisplayUrl(fullUrl);
+    }
+  }, [media.url, media.name]);
+
+  if (loading) {
+    return (
+      <div className={`flex flex-col items-center justify-center bg-vault-elevated gap-2 ${className}`}>
+        <div className="w-5 h-5 border-2 border-vault-accent border-t-transparent rounded-full animate-spin" />
+        <span className="text-[8px] text-vault-muted uppercase tracking-tight">Processing</span>
+      </div>
+    );
+  }
+
+  if (!displayUrl) {
+    return <div className={`bg-vault-elevated animate-pulse ${className}`} />;
+  }
+
+  return (
+    <img 
+      src={displayUrl} 
+      alt={media.name} 
+      className={className} 
+      loading="lazy" 
+      onClick={onClick}
+      onError={(e) => {
+        console.error(`[VaultImage] Image load error for ${media.name} at ${displayUrl}`);
+        // If it's a Cloudinary HEIC, try to force JPG format if it failed before
+        if (displayUrl.includes('cloudinary') && displayUrl.toLowerCase().endsWith('.heic')) {
+          const fallback = displayUrl.replace(/\.heic$/i, '.jpg');
+          (e.target as HTMLImageElement).src = fallback;
+        }
+      }}
+    />
+  );
+}
+
+
+
 
 interface Props {
   vaultId: string;
@@ -38,7 +122,6 @@ export function VaultInteriorView({
   theme,
   setTheme,
 }: Props) {
-
   const [filter, setFilter] = useState<FilterOption>('all');
   const [sort] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -55,15 +138,21 @@ export function VaultInteriorView({
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
   const { showToast } = useToast();
 
+  const isImage = (m: MediaItem) => m.type === 'image' || /\.(heic|heif|jpg|jpeg|png|gif|webp)$/i.test(m.name);
+  const isVideo = (m: MediaItem) => m.type === 'video' || /\.(mp4|mov|webm|avi)$/i.test(m.name);
+
+
   const filteredMedia = useMemo(() => {
     let items = [...vault.media];
+
     if (searchQuery) items = items.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()));
     switch (filter) {
-      case 'images': items = items.filter(m => m.type === 'image'); break;
-      case 'videos': items = items.filter(m => m.type === 'video'); break;
+      case 'images': items = items.filter(isImage); break;
+      case 'videos': items = items.filter(isVideo); break;
       case 'starred': items = items.filter(m => m.starred); break;
       case 'recent': items = items.slice(0, 6); break;
     }
+
     switch (sort) {
       case 'newest': items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); break;
       case 'oldest': items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); break;
@@ -113,7 +202,6 @@ export function VaultInteriorView({
     return () => window.removeEventListener('keydown', handler);
   }, [previewIndex, filteredMedia.length]);
 
-
   if (uploadView) {
     return <UploadView 
       initialFiles={droppedFiles}
@@ -125,9 +213,6 @@ export function VaultInteriorView({
     />;
   }
 
-
-
-
   if (settingsView) {
     return <VaultSettingsView
       vault={vault}
@@ -137,14 +222,12 @@ export function VaultInteriorView({
       onDestroyVault={onDeleteVault}
       onRevokeAccess={onRevokeAccess}
     />;
-
   }
 
   if (shareView) {
     return <ShareView vaultId={vaultId} vault={vault} onClose={() => setShareView(false)} />;
   }
 
-  // Clean full-screen media preview
   if (previewIndex !== null && filteredMedia[previewIndex]) {
     const item = filteredMedia[previewIndex];
     return (
@@ -166,13 +249,11 @@ export function VaultInteriorView({
           </button>
         )}
 
-        {item.type === 'image' && item.url ? (
-          <img
-            key={previewIndex}
-            src={item.url}
-            alt={item.name}
+        {isImage(item) && item.url ? (
+          <VaultImage
+            media={item}
             className="max-h-full max-w-full object-contain"
-            onClick={e => e.stopPropagation()}
+            onClick={(e: any) => e.stopPropagation()}
           />
         ) : (
           <div className="text-center" onClick={e => e.stopPropagation()}>
@@ -200,7 +281,6 @@ export function VaultInteriorView({
       className="flex flex-col h-screen bg-vault-bg relative"
       onDragOver={e => { e.preventDefault(); setIsDraggingGlobal(true); }}
       onDragLeave={e => {
-        // Only set false if we leave the main container
         if (e.currentTarget === e.target) setIsDraggingGlobal(false);
       }}
       onDrop={handleGlobalDrop}
@@ -220,8 +300,6 @@ export function VaultInteriorView({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Top bar */}
 
       <div className="flex-shrink-0 border-b border-vault-border">
         <div className="flex items-center gap-3 px-4 h-14">
@@ -307,7 +385,6 @@ export function VaultInteriorView({
         </div>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {filteredMedia.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
@@ -333,13 +410,14 @@ export function VaultInteriorView({
                 }) : setPreviewIndex(idx)}
               >
                 <div className="aspect-square relative bg-vault-elevated">
-                  {item.type === 'image' && item.url ? (
-                    <img src={item.url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
+                  {isImage(item) && item.url ? (
+                    <VaultImage media={item} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <Play size={20} className="text-vault-muted" />
                     </div>
                   )}
+
                   {item.type === 'video' && item.duration && (
                     <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 bg-black/70 text-white text-[10px] font-mono">{item.duration}</span>
                   )}
@@ -367,12 +445,13 @@ export function VaultInteriorView({
                 onClick={() => setPreviewIndex(idx)}
               >
                 <div className="w-10 h-10 overflow-hidden bg-vault-elevated flex-shrink-0">
-                  {item.type === 'image' && item.url ? (
-                    <img src={item.url} alt="" className="w-full h-full object-cover" />
+                  {isImage(item) && item.url ? (
+                    <VaultImage media={item} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center"><Play size={14} className="text-vault-muted" /></div>
                   )}
                 </div>
+
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-vault-text truncate">{item.name}</p>
                   <p className="text-xs text-vault-muted">{item.size} · {item.date}</p>
@@ -383,7 +462,6 @@ export function VaultInteriorView({
         )}
       </div>
 
-      {/* Bulk actions */}
       <AnimatePresence>
         {selectMode && selected.size > 0 && (
           <motion.div
@@ -419,17 +497,47 @@ export function VaultInteriorView({
 
 /* ============ Upload ============ */
 function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => void; onUpload: (files: File[], onProgress: (p: number) => void) => Promise<void>; initialFiles?: File[] }) {
-  const [files, setFiles] = useState<File[]>(initialFiles);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [globalProgress, setGlobalProgress] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [converting, setConverting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = (newFiles: FileList | null | File[]) => {
+  const handleFiles = async (newFiles: FileList | null | File[]) => {
     if (!newFiles) return;
     const array = Array.isArray(newFiles) ? newFiles : Array.from(newFiles);
-    setFiles(prev => [...prev, ...array]);
+    
+    setConverting(true);
+    const processedFiles: File[] = [];
+
+    for (const file of array) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext === 'heic' || ext === 'heif') {
+        try {
+          const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.8 });
+          const convertedBlob = Array.isArray(blob) ? blob[0] : blob;
+          const newFile = new File([convertedBlob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+          processedFiles.push(newFile);
+        } catch (err) {
+          console.error('HEIC conversion failed:', err);
+          processedFiles.push(file);
+        }
+      } else {
+        processedFiles.push(file);
+      }
+    }
+
+    setFiles(prev => [...prev, ...processedFiles]);
+    setConverting(false);
   };
+
+  useEffect(() => {
+    if (initialFiles.length > 0) {
+      void handleFiles(initialFiles);
+    }
+  }, []);
+
 
   const handleUpload = async () => {
     setUploading(true);
@@ -445,7 +553,6 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
     }
   };
 
-
   return (
     <div className="flex flex-col h-screen bg-vault-bg">
       <div className="flex items-center gap-3 px-4 h-14 border-b border-vault-border">
@@ -458,7 +565,7 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
         <div
           onDragOver={e => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
-          onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
+          onDrop={e => { e.preventDefault(); setDragging(false); void handleFiles(e.dataTransfer.files); }}
           onClick={() => inputRef.current?.click()}
           className={`border border-dashed p-12 text-center cursor-pointer transition-colors ${
             dragging ? 'border-vault-text bg-vault-elevated' : 'border-vault-border hover:border-vault-muted'
@@ -466,8 +573,8 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
         >
           <Upload size={24} className="mx-auto text-vault-muted mb-3" />
           <p className="text-sm text-vault-text">Drop files here or click to browse</p>
-          <p className="text-xs text-vault-muted mt-1">JPG, PNG, GIF, MP4, MOV · 500MB max</p>
-          <input ref={inputRef} type="file" multiple accept="image/*,video/*" className="hidden" onChange={e => handleFiles(e.target.files)} />
+          <p className="text-xs text-vault-muted mt-1">JPG, PNG, GIF, HEIC, MP4, MOV · 500MB max</p>
+          <input ref={inputRef} type="file" multiple accept="image/*,video/*,.heic,.heif" className="hidden" onChange={e => void handleFiles(e.target.files)} />
         </div>
 
         {files.length > 0 && (
@@ -492,7 +599,6 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
                   </button>
                 )}
                 {uploading && globalProgress >= 100 && <Check size={14} className="text-vault-success" />}
-
               </div>
             ))}
           </div>
@@ -504,10 +610,10 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
           </button>
           <button
             onClick={handleUpload}
-            disabled={files.length === 0 || uploading}
+            disabled={files.length === 0 || uploading || converting}
             className="flex-1 py-2.5 bg-vault-accent text-vault-bg text-sm font-medium disabled:opacity-30 hover:opacity-90 transition-opacity"
           >
-            {uploading ? 'Uploading...' : `Upload ${files.length}`}
+            {converting ? 'Converting...' : uploading ? 'Uploading...' : `Upload ${files.length}`}
           </button>
         </div>
       </div>
@@ -588,7 +694,6 @@ function VaultSettingsView({ vault, onUpdate, onClose, onDeleteAll, onDestroyVau
         confirmLabel="Remove Access"
         onConfirm={() => { onRevokeAccess(); }}
       />
-
 
       <ConfirmDialog
         open={confirmClearAll}
