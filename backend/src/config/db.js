@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { env } from "./env.js";
+import { env } from "./config.js";
 
 // Disable command buffering for serverless environments. 
 // This prevents Mongoose from queuing queries while the connection is not ready,

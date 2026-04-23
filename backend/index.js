@@ -1,8 +1,9 @@
 import express from "express";
-import "./src/config/env.js";
+import "./src/config/config.js";
 import app from "./src/app.js";
 import { connectDatabase } from "./src/config/db.js";
-import { env } from "./src/config/env.js";
+import { env } from "./src/config/config.js";
+
 
 
 const startServer = async () => {
