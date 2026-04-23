@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Search, Upload, Star, Play, X, Grid3X3, List,
   CheckSquare, Square, FileImage, FileVideo, Check, MoreHorizontal,
-  Copy, Eye, EyeOff, ChevronLeft, ChevronRight,
+  Copy, Eye, EyeOff,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useToast } from './Toast';

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, ChevronLeft, ChevronRight, Play, Pause, 
-  Maximize, Minimize, Volume2, VolumeX,
+  Volume2, VolumeX,
   Maximize2
 } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
@@ -26,9 +26,9 @@ function VaultImagePreview({ media }: { media: MediaItem }) {
   useEffect(() => {
     if (!media.url) return;
     
-    const isAbsolute = media.url.startsWith('http') || media.url.startsWith('blob:');
+    const isAbsolute = (media.url || "").startsWith('http') || (media.url || "").startsWith('blob:');
     const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-    const fullUrl = isAbsolute ? media.url : `${apiBase}${media.url}`;
+    const fullUrl = isAbsolute ? (media.url || "") : `${apiBase}${media.url || ""}`;
 
     // For HEIC, we might need conversion or just use the Cloudinary JPG fallback
     // In this premium version, let's assume the URL is already optimized or handled
@@ -57,11 +57,11 @@ function VaultImagePreview({ media }: { media: MediaItem }) {
       doubleClick={{ mode: "toggle" }}
     >
       <TransformComponent 
-        wrapperClassName="!w-full !h-full" 
-        contentClassName="!w-full !h-full flex items-center justify-center"
+        wrapperClass="!w-full !h-full" 
+        contentClass="!w-full !h-full flex items-center justify-center"
       >
         <img 
-          src={displayUrl} 
+          src={displayUrl || undefined} 
           alt={media.name} 
           className="max-h-full max-w-full object-contain"
           draggable={false}
@@ -78,7 +78,7 @@ function VaultVideoPreview({ media }: { media: MediaItem }) {
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const controlsTimeoutRef = useRef<any>(null);
 
   const togglePlay = () => {
     if (videoRef.current) {
@@ -129,9 +129,9 @@ function VaultVideoPreview({ media }: { media: MediaItem }) {
     }
   }, []);
 
-  const isAbsolute = media.url.startsWith('http') || media.url.startsWith('blob:');
+  const isAbsolute = (media.url || "").startsWith('http') || (media.url || "").startsWith('blob:');
   const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-  const fullUrl = isAbsolute ? media.url : `${apiBase}${media.url}`;
+  const fullUrl = isAbsolute ? (media.url || "") : `${apiBase}${media.url || ""}`;
 
   return (
     <div 
