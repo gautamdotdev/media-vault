@@ -141,15 +141,15 @@ export default function App() {
     <ToastProvider>
       <div className="h-screen flex flex-col bg-vault-bg text-vault-text overflow-hidden">
         <div className="flex-1 overflow-hidden">
-          <AnimatePresence mode="wait">
+          <AnimatePresence>
             <Routes location={location} key={location.pathname.split('/')[1]}>
               <Route path="/" element={
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="h-full">
                   <HomeView vaults={vaults} onOpenVault={handleOpenVault} onNavigate={(v) => navigate(v === 'home' ? '/' : `/${v}`)} />
                 </motion.div>
               } />
               <Route path="/create" element={
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="h-full">
                   <CreateVaultView
                     onBack={() => navigate('/')}
                     onOpenVault={handleOpenVault}
@@ -160,7 +160,7 @@ export default function App() {
                 </motion.div>
               } />
               <Route path="/access" element={
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="h-full">
                   <AccessVaultView onBack={() => navigate('/')} onUnlock={handleOpenVault} onNavigate={(v) => navigate(`/${v}`)} vaults={vaults} />
                 </motion.div>
               } />
@@ -196,7 +196,7 @@ function VaultRouteWrapper({ vaults, onLock, onUpdateVault, theme, setTheme, set
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="h-full">
       <VaultInteriorView
         vaultId={id}
         vault={vault}

@@ -238,6 +238,7 @@ export function MediaPreview({ item, onClose, onNext, onPrev, hasNext, hasPrev, 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       className="fixed inset-0 z-[100] bg-[#050505]/95 backdrop-blur-2xl flex items-center justify-center overflow-hidden"
     >
       {/* Top Header */}
