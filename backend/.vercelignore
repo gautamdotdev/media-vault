@@ -1,0 +1,8 @@
+node_modules
+scripts
+src
+Dockerfile
+.dockerignore
+.git
+.gitignore
+.env

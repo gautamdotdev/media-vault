@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    container_name: media-vault-backend
+    ports:
+      - "1000:1000"
+    env_file:
+      - .env
+    restart: unless-stopped
