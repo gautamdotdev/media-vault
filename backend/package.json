@@ -2,11 +2,12 @@
   "name": "media-vault-backend",
   "version": "1.0.0",
   "type": "module",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "dev": "node --watch server.js",
-    "start": "node server.js"
+    "dev": "node --watch index.js",
+    "start": "node index.js"
   },
+
   "dependencies": {
     "cloudinary": "^2.8.0",
     "cors": "^2.8.5",

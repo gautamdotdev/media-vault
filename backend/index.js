@@ -1,7 +1,9 @@
+import express from "express";
 import "./src/config/env.js";
 import app from "./src/app.js";
 import { connectDatabase } from "./src/config/db.js";
 import { env } from "./src/config/env.js";
+
 
 const startServer = async () => {
   try {
