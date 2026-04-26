@@ -46,36 +46,76 @@ export const api = {
     return data.vault;
   },
 
-  async uploadMedia(vaultId: string, files: File[], onProgress?: (percent: number) => void): Promise<Vault> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const formData = new FormData();
-      files.forEach((file) => formData.append("files", file));
+  async uploadMedia(
+    vaultId: string,
+    files: File[],
+    onProgress?: (fileIndex: number, percent: number, bytesLoaded: number, bytesTotal: number) => void,
+  ): Promise<Vault> {
+    /** Upload a single file with retry support */
+    const uploadOne = (file: File, index: number, attempt = 0): Promise<Vault> =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append("files", file);
 
-      xhr.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable && onProgress) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          onProgress(percent);
-        }
-      });
-
-      xhr.addEventListener("load", () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const data = JSON.parse(xhr.responseText);
-            resolve(data.vault);
-          } catch (e) {
-            reject(new Error("Failed to parse response"));
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable && onProgress) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(index, percent, event.loaded, event.total);
           }
-        } else {
-          reject(new Error(xhr.statusText || "Upload failed"));
-        }
+        });
+
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              onProgress?.(index, 100, file.size, file.size);
+              resolve(data.vault);
+            } catch {
+              reject(new Error("Failed to parse response"));
+            }
+          } else {
+            // Parse JSON error body from the server for a user-friendly message
+            let errMsg = xhr.statusText || `Upload failed (HTTP ${xhr.status})`;
+            try {
+              const errData = JSON.parse(xhr.responseText);
+              if (errData.message) errMsg = errData.message;
+            } catch { /* ignore parse failures */ }
+
+            // Don't retry client errors (4xx) — they'll always fail
+            const isClientError = xhr.status >= 400 && xhr.status < 500;
+            if (attempt < 1 && !isClientError) {
+              setTimeout(() => uploadOne(file, index, attempt + 1).then(resolve, reject), 1500);
+            } else {
+              reject(new Error(errMsg));
+            }
+          }
+        });
+
+        xhr.addEventListener("error", () => {
+          if (attempt < 1) {
+            setTimeout(() => uploadOne(file, index, attempt + 1).then(resolve, reject), 1500);
+          } else {
+            reject(new Error("Network error"));
+          }
+        });
+
+        xhr.open("POST", `${API_BASE_URL}/api/vaults/${vaultId}/media`);
+        xhr.send(formData);
       });
 
-      xhr.addEventListener("error", () => reject(new Error("Network error")));
-      xhr.open("POST", `${API_BASE_URL}/api/vaults/${vaultId}/media`);
-      xhr.send(formData);
+    // Upload all files concurrently and return the last vault state (most up-to-date after all uploads)
+    const results = await Promise.all(files.map((file, idx) => uploadOne(file, idx)));
+    // The last resolved vault will have all previously uploaded items since the server appends them;
+    // however since uploads are concurrent we can't guarantee order. Merge all media from all results.
+    const allMedia = results.flatMap((v) => v.media);
+    const seen = new Set<string>();
+    const mergedMedia = allMedia.filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
     });
+    return { ...results[results.length - 1], media: mergedMedia };
   },
 
 

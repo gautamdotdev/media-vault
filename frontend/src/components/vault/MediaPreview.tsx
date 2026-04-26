@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  X, ChevronLeft, ChevronRight, Play, Pause, 
-  Volume2, VolumeX,
-  Maximize2
+import {
+  X, ChevronLeft, ChevronRight, Play, Pause,
+  Volume2, VolumeX, Maximize2,
 } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { MediaItem } from './types';
@@ -19,28 +18,37 @@ interface MediaPreviewProps {
   totalCount: number;
 }
 
+
+/** Shared Cloudinary HEIC→JPEG URL rewriter (mirrors VaultInteriorView) */
+function toDisplayUrl(url: string, fileName: string): string {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const fullUrl = url.startsWith('http') || url.startsWith('blob:') ? url : `${apiBase}${url}`;
+  const isHeic = /\.(heic|heif)$/i.test(fileName);
+  const isCloudinary = fullUrl.includes('res.cloudinary.com');
+  if (isHeic && isCloudinary) {
+    return fullUrl.replace(/\/upload\//, '/upload/f_jpg,q_auto/');
+  }
+  return fullUrl;
+}
+
 function VaultImagePreview({ media }: { media: MediaItem }) {
-  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
-    if (!media.url) return;
-    
-    const isAbsolute = (media.url || "").startsWith('http') || (media.url || "").startsWith('blob:');
-    const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-    const fullUrl = isAbsolute ? (media.url || "") : `${apiBase}${media.url || ""}`;
-
-    // For HEIC, we might need conversion or just use the Cloudinary JPG fallback
-    // In this premium version, let's assume the URL is already optimized or handled
-    setDisplayUrl(fullUrl);
-    setLoading(false);
-  }, [media.url, media.name]);
-
-  if (loading || !displayUrl) {
+  if (!media.url) {
     return (
-      <div className="flex flex-col items-center justify-center gap-4">
-        <div className="w-10 h-10 border-3 border-vault-accent border-t-transparent rounded-full animate-spin" />
-        <span className="text-xs text-vault-muted uppercase tracking-[0.2em] font-medium">Loading Media</span>
+      <div className="flex flex-col items-center gap-3 text-white/40">
+        <p className="text-sm">No image URL</p>
+      </div>
+    );
+  }
+
+  const displayUrl = toDisplayUrl(media.url, media.name);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center gap-3 text-white/40">
+        <p className="text-sm">Unable to load image</p>
+        <p className="text-xs font-mono">{media.name}</p>
       </div>
     );
   }
@@ -54,22 +62,33 @@ function VaultImagePreview({ media }: { media: MediaItem }) {
       centerOnInit
       wheel={{ step: 0.1 }}
       pinch={{ step: 1 }}
-      doubleClick={{ mode: "toggle" }}
+      doubleClick={{ mode: 'toggle' }}
     >
-      <TransformComponent 
-        wrapperClass="!w-full !h-full" 
+      <TransformComponent
+        wrapperClass="!w-full !h-full"
         contentClass="!w-full !h-full flex items-center justify-center"
       >
-        <img 
-          src={displayUrl || undefined} 
-          alt={media.name} 
+        <img
+          src={displayUrl}
+          alt={media.name}
           className="max-h-full max-w-full object-contain"
           draggable={false}
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            if (!target.dataset.fallback && displayUrl.includes('cloudinary')) {
+              target.dataset.fallback = '1';
+              target.src = displayUrl.replace(/\/upload\/[^/]+\//, '/upload/f_auto,q_auto/');
+            } else {
+              setError(true);
+            }
+          }}
         />
       </TransformComponent>
     </TransformWrapper>
   );
 }
+
+
 
 function VaultVideoPreview({ media }: { media: MediaItem }) {
   const videoRef = useRef<HTMLVideoElement>(null);

@@ -14,7 +14,10 @@ import {
 } from "../controllers/vaultController.js";
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB per file
+});
 
 router.get("/health", getHealth);
 router.get("/vaults", getVaults);

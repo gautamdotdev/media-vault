@@ -129,8 +129,10 @@ export const updateVault = asyncHandler(async (req, res) => {
 // @route   POST /api/vaults/:vaultId/media
 export const uploadMedia = asyncHandler(async (req, res) => {
   const { vaultId } = req.params;
-  const vault = await Vault.findOne({ vaultId });
-  if (!vault) {
+
+  // Quick existence check (no version stamp read)
+  const exists = await Vault.exists({ vaultId });
+  if (!exists) {
     res.status(404);
     throw new Error("Vault not found");
   }
@@ -141,16 +143,26 @@ export const uploadMedia = asyncHandler(async (req, res) => {
     throw new Error("No files uploaded");
   }
 
+  // Upload to Cloudinary first (outside of any DB transaction)
   const uploads = await Promise.all(
     files.map((file) => uploadFileToCloudinary(file, vaultId)),
   );
 
-  vault.media.unshift(...uploads);
-  await vault.save();
+  // Atomic prepend — does NOT read __v, so parallel requests never conflict
+  const updated = await Vault.findOneAndUpdate(
+    { vaultId },
+    { $push: { media: { $each: uploads, $position: 0 } } },
+    { new: true },
+  );
+
+  if (!updated) {
+    res.status(404);
+    throw new Error("Vault not found after upload");
+  }
 
   res.json({
     success: true,
-    vault: normalizeVault(vault),
+    vault: normalizeVault(updated),
   });
 });
 

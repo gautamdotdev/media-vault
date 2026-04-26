@@ -164,7 +164,7 @@ export default function App() {
                   <AccessVaultView onBack={() => navigate('/')} onUnlock={handleOpenVault} onNavigate={(v) => navigate(`/${v}`)} vaults={vaults} />
                 </motion.div>
               } />
-              <Route path="/vault/:id" element={<VaultRouteWrapper vaults={vaults} onLock={handleLock} onUpdateVault={setVaults} theme={theme} setTheme={setTheme} setKnownVaultIds={setKnownVaultIds} setUnlockedPasswords={setUnlockedPasswords} onRevokeAccess={(id: string) => {
+              <Route path="/vault/:id" element={<VaultRouteWrapper vaults={vaults} onLock={handleLock} onUpdateVault={setVaults} theme={theme} setTheme={setTheme} setKnownVaultIds={setKnownVaultIds} setUnlockedPasswords={setUnlockedPasswords} unlockedPasswords={unlockedPasswords} onRevokeAccess={(id: string) => {
                 setKnownVaultIds(prev => prev.filter(vid => vid !== id));
                 setUnlockedPasswords(prev => {
                   const next = { ...prev };
@@ -185,7 +185,7 @@ export default function App() {
   );
 }
 
-function VaultRouteWrapper({ vaults, onLock, onUpdateVault, theme, setTheme, setKnownVaultIds, setUnlockedPasswords, onRevokeAccess }: any) {
+function VaultRouteWrapper({ vaults, onLock, onUpdateVault, theme, setTheme, setKnownVaultIds, setUnlockedPasswords, onRevokeAccess, unlockedPasswords }: any) {
 
   const { id } = useParams();
   const navigate = useNavigate();
@@ -202,6 +202,12 @@ function VaultRouteWrapper({ vaults, onLock, onUpdateVault, theme, setTheme, set
         vault={vault}
         onLock={() => onLock(id)}
         onRevokeAccess={() => onRevokeAccess(id)}
+        onRefresh={async () => {
+          const password = unlockedPasswords[id];
+          if (!password) return;
+          const refreshed = await api.accessVault(id, password);
+          onUpdateVault((prev: any) => ({ ...prev, [id]: refreshed }));
+        }}
         onUpdateVault={async (v: any) => {
           const saved = await api.saveVault(id, v);
           onUpdateVault((prev: any) => ({ ...prev, [id]: saved }));
@@ -236,7 +242,14 @@ function VaultRouteWrapper({ vaults, onLock, onUpdateVault, theme, setTheme, set
           onUpdateVault((prev: any) => ({ ...prev, [id]: updated }));
         }}
         onUploadMedia={async (files: any, onProgress?: any) => {
-          const updated = await api.uploadMedia(id, files, onProgress);
+          const updated = await api.uploadMedia(
+            id,
+            files,
+            onProgress
+              ? (fileIndex: number, percent: number, bytesLoaded: number, bytesTotal: number) =>
+                  onProgress(fileIndex, percent, bytesLoaded, bytesTotal)
+              : undefined,
+          );
           onUpdateVault((prev: any) => ({ ...prev, [id]: updated }));
         }}
       />

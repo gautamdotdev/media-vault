@@ -3,89 +3,117 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Search, Upload, Star, Play, X, Grid3X3, List,
   CheckSquare, Square, FileImage, FileVideo, Check, MoreHorizontal,
-  Copy, Eye, EyeOff,
+  Copy, Eye, EyeOff, RefreshCw,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useToast } from './Toast';
-import { ConfirmDialog } from './ConfirmDialog';
 import { MediaPreview } from './MediaPreview';
 import type { Vault, FilterOption, SortOption, ViewMode, MediaItem } from './types';
 import heic2any from 'heic2any';
 
-function VaultImage({ media, className, onClick }: { media: MediaItem; className?: string; onClick?: (e: any) => void }) {
-  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+/* ============ Smooth Confirm Dialog (framer-motion) ============ */
+function ConfirmDialog({
+  open, onOpenChange, title, description, confirmLabel = 'Confirm', destructive = true, onConfirm,
+}: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  title: string; description: string;
+  confirmLabel?: string; destructive?: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            key="backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+            onClick={() => onOpenChange(false)}
+          />
+          {/* Panel */}
+          <motion.div
+            key="panel"
+            initial={{ opacity: 0, scale: 0.92, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.92, y: 8 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 bg-vault-surface border border-vault-border shadow-2xl p-5"
+          >
+            <p className="text-sm font-medium text-vault-text mb-1">{title}</p>
+            <p className="text-xs text-vault-muted mb-5">{description}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onOpenChange(false)}
+                className="flex-1 py-2.5 border border-vault-border text-vault-text text-xs hover:bg-vault-elevated transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { onConfirm(); onOpenChange(false); }}
+                className={`flex-1 py-2.5 text-xs font-medium transition-opacity hover:opacity-90 ${
+                  destructive ? 'bg-vault-danger text-white' : 'bg-vault-accent text-vault-bg'
+                }`}
+              >
+                {confirmLabel}
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
 
-  useEffect(() => {
-    if (!media.url) return;
-    
-    // Determine absolute URL
-    const isAbsolute = media.url.startsWith('http') || media.url.startsWith('blob:');
-    const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-    const fullUrl = isAbsolute ? media.url : `${apiBase}${media.url}`;
+/**
+ * Rewrites a Cloudinary HEIC/HEIF URL to serve as JPEG via Cloudinary's
+ * server-side transformation (f_jpg,q_auto). This is far more reliable than
+ * client-side libheif conversion which fails on many HEIC encodings.
+ *
+ * Input:  https://res.cloudinary.com/<cloud>/image/upload/v123/folder/file.heic
+ * Output: https://res.cloudinary.com/<cloud>/image/upload/f_jpg,q_auto/v123/folder/file.heic
+ */
+function toDisplayUrl(url: string, fileName: string): string {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const fullUrl = url.startsWith('http') || url.startsWith('blob:') ? url : `${apiBase}${url}`;
 
-    const isHeic = /\.(heic|heif)$/i.test(media.name);
-    
-    if (isHeic) {
-      console.log(`[VaultImage] Converting HEIC: ${media.name}`);
-      setLoading(true);
-      fetch(fullUrl)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.blob();
-        })
-        .then(blob => {
-          console.log(`[VaultImage] Blob fetched, starting conversion for ${media.name}`);
-          return heic2any({ blob, toType: 'image/jpeg', quality: 0.7 });
-        })
-        .then(converted => {
-          const blobUrl = URL.createObjectURL(Array.isArray(converted) ? converted[0] : converted);
-          console.log(`[VaultImage] Conversion successful: ${blobUrl}`);
-          setDisplayUrl(blobUrl);
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error(`[VaultImage] HEIC conversion failed for ${media.name}:`, err);
-          setDisplayUrl(fullUrl);
-          setLoading(false);
-        });
-        
-      return () => {
-        if (displayUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(displayUrl);
-        }
-      };
-    } else {
-      setDisplayUrl(fullUrl);
-    }
-  }, [media.url, media.name]);
+  const isHeic = /\.(heic|heif)$/i.test(fileName);
+  const isCloudinary = fullUrl.includes('res.cloudinary.com');
 
-  if (loading) {
-    return (
-      <div className={`flex flex-col items-center justify-center bg-vault-elevated gap-2 ${className}`}>
-        <div className="w-5 h-5 border-2 border-vault-accent border-t-transparent rounded-full animate-spin" />
-        <span className="text-[8px] text-vault-muted uppercase tracking-tight">Processing</span>
-      </div>
+  if (isHeic && isCloudinary) {
+    // Insert f_jpg,q_auto transformation after /upload/
+    return fullUrl.replace(
+      /\/upload\//,
+      '/upload/f_jpg,q_auto/'
     );
   }
+
+  return fullUrl;
+}
+
+function VaultImage({ media, className, onClick }: { media: MediaItem; className?: string; onClick?: (e: any) => void }) {
+  const displayUrl = media.url ? toDisplayUrl(media.url, media.name) : null;
 
   if (!displayUrl) {
     return <div className={`bg-vault-elevated animate-pulse ${className}`} />;
   }
 
   return (
-    <img 
-      src={displayUrl} 
-      alt={media.name} 
-      className={className} 
-      loading="lazy" 
+    <img
+      src={displayUrl}
+      alt={media.name}
+      className={className}
+      loading="lazy"
       onClick={onClick}
       onError={(e) => {
-        console.error(`[VaultImage] Image load error for ${media.name} at ${displayUrl}`);
-        // If it's a Cloudinary HEIC, try to force JPG format if it failed before
-        if (displayUrl.includes('cloudinary') && displayUrl.toLowerCase().endsWith('.heic')) {
-          const fallback = displayUrl.replace(/\.heic$/i, '.jpg');
-          (e.target as HTMLImageElement).src = fallback;
+        // Last-resort fallback: try stripping any transformation and requesting auto format
+        const target = e.target as HTMLImageElement;
+        if (!target.dataset.fallback && displayUrl.includes('cloudinary')) {
+          target.dataset.fallback = '1';
+          target.src = displayUrl.replace(/\/upload\/[^/]+\//, '/upload/f_auto,q_auto/');
         }
       }}
     />
@@ -93,18 +121,88 @@ function VaultImage({ media, className, onClick }: { media: MediaItem; className
 }
 
 
+/** Extracts a thumbnail from the first seekable frame of a video URL */
+function VaultVideoThumb({ media, className, onClick }: { media: MediaItem; className?: string; onClick?: (e: React.MouseEvent) => void }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!media.url) { setFailed(true); return; }
+    const isAbsolute = media.url.startsWith('http') || media.url.startsWith('blob:');
+    const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+    const fullUrl = isAbsolute ? media.url : `${apiBase}${media.url}`;
+
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    const cleanup = () => {
+      video.src = '';
+      video.load();
+    };
+
+    video.addEventListener('loadedmetadata', () => {
+      // Seek to 1s or 10% into the video, whichever is smaller
+      video.currentTime = Math.min(1, video.duration * 0.1);
+    });
+
+    video.addEventListener('seeked', () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 320;
+        canvas.height = video.videoHeight || 180;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { setFailed(true); cleanup(); return; }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        setThumbUrl(canvas.toDataURL('image/jpeg', 0.7));
+      } catch {
+        setFailed(true);
+      }
+      cleanup();
+    });
+
+    video.addEventListener('error', () => { setFailed(true); cleanup(); });
+
+    video.src = fullUrl;
+
+    return () => {
+      cleanup();
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    };
+  }, [media.url]);
+
+  if (failed || !thumbUrl) {
+    return (
+      <div className={`flex items-center justify-center bg-vault-elevated ${className}`} onClick={onClick}>
+        <Play size={20} className="text-vault-muted" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={thumbUrl}
+      alt={media.name}
+      className={className}
+      onClick={onClick}
+    />
+  );
+}
 
 
 interface Props {
   vaultId: string;
   vault: Vault;
   onLock: () => void;
+  onRefresh: () => Promise<void>;
   onUpdateVault: (v: Vault) => Promise<void> | void;
   onDeleteVault: () => Promise<void> | void;
   onClearAllMedia: () => Promise<void> | void;
   onRemoveMedia: (ids: string[]) => Promise<void> | void;
   onToggleStar: (mediaId: string) => Promise<void> | void;
-  onUploadMedia: (files: File[], onProgress?: (p: number) => void) => Promise<void> | void;
+  onUploadMedia: (files: File[], onProgress?: (fileIndex: number, percent: number, bytesLoaded: number, bytesTotal: number) => void) => Promise<void> | void;
   onRevokeAccess: () => void;
   theme: string;
   setTheme: (t: string) => void;
@@ -114,6 +212,7 @@ export function VaultInteriorView({
   vaultId,
   vault,
   onLock,
+  onRefresh,
   onUpdateVault,
   onDeleteVault,
   onClearAllMedia,
@@ -124,6 +223,13 @@ export function VaultInteriorView({
   theme,
   setTheme,
 }: Props) {
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await onRefresh(); } catch { /* silent */ }
+    finally { setRefreshing(false); }
+  }, [onRefresh]);
+
   const [filter, setFilter] = useState<FilterOption>('all');
   const [sort] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -323,6 +429,14 @@ export function VaultInteriorView({
             <button onClick={() => setUploadView(true)} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
               <Upload size={18} />
             </button>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="Sync media"
+              className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors disabled:opacity-40"
+            >
+              <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+            </button>
             <div className="relative">
               <button onClick={() => setMenuOpen(!menuOpen)} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
                 <MoreHorizontal size={18} />
@@ -385,8 +499,12 @@ export function VaultInteriorView({
             <button onClick={() => setViewMode('list')} className={`w-8 h-8 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-vault-text' : 'text-vault-muted hover:text-vault-text'}`}>
               <List size={16} />
             </button>
-            <button onClick={() => { setSelectMode(!selectMode); setSelected(new Set()); }} className={`w-8 h-8 flex items-center justify-center transition-colors ${selectMode ? 'text-vault-text' : 'text-vault-muted hover:text-vault-text'}`}>
-              <CheckSquare size={16} />
+            <button 
+              onClick={() => { setSelectMode(!selectMode); setSelected(new Set()); }} 
+              className={`w-8 h-8 flex items-center justify-center transition-colors ${selectMode ? 'text-vault-accent' : 'text-vault-muted hover:text-vault-text'}`}
+              title={selectMode ? 'Exit selection' : 'Select items'}
+            >
+              {selectMode ? <X size={16} /> : <CheckSquare size={16} />}
             </button>
           </div>
         </div>
@@ -419,6 +537,15 @@ export function VaultInteriorView({
                 <div className="aspect-square relative bg-vault-elevated">
                   {isImage(item) && item.url ? (
                     <VaultImage media={item} className="w-full h-full object-cover" />
+                  ) : isVideo(item) && item.url ? (
+                    <>
+                      <VaultVideoThumb media={item} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-8 h-8 rounded-full bg-black/50 flex items-center justify-center">
+                          <Play size={14} className="text-white ml-0.5" />
+                        </div>
+                      </div>
+                    </>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <Play size={20} className="text-vault-muted" />
@@ -451,9 +578,16 @@ export function VaultInteriorView({
                 className="flex items-center gap-3 px-4 py-3 border-b border-vault-border/40 cursor-pointer hover:bg-vault-elevated transition-colors"
                 onClick={() => updatePreviewUrl(idx)}
               >
-                <div className="w-10 h-10 overflow-hidden bg-vault-elevated flex-shrink-0">
+                <div className="w-10 h-10 overflow-hidden bg-vault-elevated flex-shrink-0 relative">
                   {isImage(item) && item.url ? (
                     <VaultImage media={item} className="w-full h-full object-cover" />
+                  ) : isVideo(item) && item.url ? (
+                    <>
+                      <VaultVideoThumb media={item} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                        <Play size={10} className="text-white ml-0.5" />
+                      </div>
+                    </>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center"><Play size={14} className="text-vault-muted" /></div>
                   )}
@@ -503,18 +637,84 @@ export function VaultInteriorView({
 }
 
 /* ============ Upload ============ */
-function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => void; onUpload: (files: File[], onProgress: (p: number) => void) => Promise<void>; initialFiles?: File[] }) {
+
+type FileUploadState = 'idle' | 'uploading' | 'done' | 'error';
+
+interface FileProgress {
+  percent: number;
+  bytesLoaded: number;
+  bytesTotal: number;
+  speed: number; // bytes per second
+  state: FileUploadState;
+  startTime: number;
+  errorMsg?: string;
+}
+
+function VideoThumbPreview({ file }: { file: File }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+    video.addEventListener('loadedmetadata', () => { video.currentTime = Math.min(1, video.duration * 0.1); });
+    video.addEventListener('seeked', () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 64; c.height = 64;
+        const ctx = c.getContext('2d');
+        ctx?.drawImage(video, 0, 0, 64, 64);
+        setThumbUrl(c.toDataURL('image/jpeg', 0.7));
+      } catch { /* ignore */ }
+      URL.revokeObjectURL(url);
+    });
+    video.addEventListener('error', () => URL.revokeObjectURL(url));
+    video.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, []);
+  if (!thumbUrl) return <FileVideo size={14} className="text-vault-muted" />;
+  return <img src={thumbUrl} alt="" className="w-full h-full object-cover" />;
+}
+
+function ImageThumbPreview({ file }: { file: File }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, []);
+  if (!thumbUrl) return <FileImage size={14} className="text-vault-muted" />;
+  return <img src={thumbUrl} alt="" className="w-full h-full object-cover" />;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatSpeed(bps: number): string {
+  if (bps < 1024) return `${bps.toFixed(0)} B/s`;
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
+  return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function UploadView({ onClose, onUpload, initialFiles = [] }: {
+  onClose: () => void;
+  onUpload: (files: File[], onProgress: (fileIndex: number, percent: number, bytesLoaded: number, bytesTotal: number) => void) => Promise<void>;
+  initialFiles?: File[];
+}) {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [globalProgress, setGlobalProgress] = useState(0);
+  const [fileProgress, setFileProgress] = useState<FileProgress[]>([]);
   const [dragging, setDragging] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = async (newFiles: FileList | null | File[]) => {
     if (!newFiles) return;
     const array = Array.isArray(newFiles) ? newFiles : Array.from(newFiles);
-    
     setConverting(true);
     const processedFiles: File[] = [];
 
@@ -540,79 +740,190 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
   };
 
   useEffect(() => {
-    if (initialFiles.length > 0) {
-      void handleFiles(initialFiles);
-    }
+    if (initialFiles.length > 0) void handleFiles(initialFiles);
   }, []);
 
-
   const handleUpload = async () => {
+    if (!files.length) return;
     setUploading(true);
-    setGlobalProgress(0);
+    setUploadError(null);
+
+    const now = Date.now();
+    const initProgress: FileProgress[] = files.map(() => ({
+      percent: 0, bytesLoaded: 0, bytesTotal: 0, speed: 0,
+      state: 'uploading' as FileUploadState, startTime: now,
+    }));
+    setFileProgress(initProgress);
+
     try {
-      await onUpload(files, (p) => {
-        setGlobalProgress(p);
+      await onUpload(files, (fileIndex, percent, bytesLoaded, bytesTotal) => {
+        setFileProgress(prev => {
+          const next = [...prev];
+          const entry = next[fileIndex];
+          if (!entry) return prev;
+          const elapsed = (Date.now() - entry.startTime) / 1000;
+          const speed = elapsed > 0 ? bytesLoaded / elapsed : 0;
+          next[fileIndex] = {
+            ...entry,
+            percent,
+            bytesLoaded,
+            bytesTotal,
+            speed,
+            state: percent >= 100 ? 'done' : 'uploading',
+          };
+          return next;
+        });
       });
-      onClose();
-    } catch (err) {
-      console.error(err);
+      // Mark all as done
+      setFileProgress(prev => prev.map(p => ({ ...p, percent: 100, state: 'done' })));
+      setTimeout(() => onClose(), 400);
+    } catch (err: any) {
+      const msg = err?.message || 'Upload failed';
+      setUploadError(msg);
+      setFileProgress(prev => prev.map(p => p.state === 'uploading' ? { ...p, state: 'error', errorMsg: msg } : p));
       setUploading(false);
     }
   };
 
+  const globalPercent = fileProgress.length > 0
+    ? Math.round(fileProgress.reduce((s, p) => s + p.percent, 0) / fileProgress.length)
+    : 0;
+
+  const totalSpeed = fileProgress.reduce((s, p) => s + (p.state === 'uploading' ? p.speed : 0), 0);
+
   return (
     <div className="flex flex-col h-screen bg-vault-bg">
       <div className="flex items-center gap-3 px-4 h-14 border-b border-vault-border">
-        <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
+        <button onClick={onClose} disabled={uploading} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors disabled:opacity-40">
           <ArrowLeft size={20} />
         </button>
-        <span className="text-sm font-medium text-vault-text">Upload</span>
+        <span className="text-sm font-medium text-vault-text flex-1">Upload</span>
+        {uploading && (
+          <span className="text-xs text-vault-muted font-mono">
+            {globalPercent}% · {formatSpeed(totalSpeed)}
+          </span>
+        )}
       </div>
-      <div className="flex-1 flex flex-col px-4 pt-6 pb-6 overflow-y-auto">
-        <div
-          onDragOver={e => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={e => { e.preventDefault(); setDragging(false); void handleFiles(e.dataTransfer.files); }}
-          onClick={() => inputRef.current?.click()}
-          className={`border border-dashed p-12 text-center cursor-pointer transition-colors ${
-            dragging ? 'border-vault-text bg-vault-elevated' : 'border-vault-border hover:border-vault-muted'
-          }`}
-        >
-          <Upload size={24} className="mx-auto text-vault-muted mb-3" />
-          <p className="text-sm text-vault-text">Drop files here or click to browse</p>
-          <p className="text-xs text-vault-muted mt-1">JPG, PNG, GIF, HEIC, MP4, MOV · 500MB max</p>
-          <input ref={inputRef} type="file" multiple accept="image/*,video/*,.heic,.heif" className="hidden" onChange={e => void handleFiles(e.target.files)} />
-        </div>
 
-        {files.length > 0 && (
-          <div className="mt-4 space-y-1">
-            {files.map(f => (
-              <div key={f.name} className="flex items-center gap-3 px-3 py-2.5 border border-vault-border">
-                <div className="w-8 h-8 bg-vault-elevated flex items-center justify-center flex-shrink-0">
-                  {f.type.startsWith('image') ? <FileImage size={14} className="text-vault-muted" /> : <FileVideo size={14} className="text-vault-muted" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-vault-text truncate">{f.name}</p>
-                  <p className="text-[10px] text-vault-muted">{(f.size / 1024 / 1024).toFixed(1)} MB</p>
-                  {uploading && (
-                    <div className="mt-1 h-0.5 bg-vault-border overflow-hidden">
-                      <div className="h-full bg-vault-text transition-all duration-200" style={{ width: `${globalProgress}%` }} />
-                    </div>
-                  )}
-                </div>
-                {!uploading && (
-                  <button onClick={(e) => { e.stopPropagation(); setFiles(prev => prev.filter(x => x !== f)); }} className="w-7 h-7 flex items-center justify-center text-vault-muted hover:text-vault-text">
-                    <X size={14} />
-                  </button>
-                )}
-                {uploading && globalProgress >= 100 && <Check size={14} className="text-vault-success" />}
-              </div>
-            ))}
+      {/* Global progress bar */}
+      {uploading && (
+        <div className="h-0.5 bg-vault-border">
+          <div
+            className="h-full bg-vault-accent transition-all duration-300"
+            style={{ width: `${globalPercent}%` }}
+          />
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col px-4 pt-6 pb-6 overflow-y-auto">
+        {!uploading && (
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => { e.preventDefault(); setDragging(false); void handleFiles(e.dataTransfer.files); }}
+            onClick={() => inputRef.current?.click()}
+            className={`border border-dashed p-10 text-center cursor-pointer transition-colors ${
+              dragging ? 'border-vault-text bg-vault-elevated' : 'border-vault-border hover:border-vault-muted'
+            }`}
+          >
+            <Upload size={24} className="mx-auto text-vault-muted mb-3" />
+            <p className="text-sm text-vault-text">Drop files here or click to browse</p>
+            <p className="text-xs text-vault-muted mt-1">JPG, PNG, GIF, HEIC, MP4, MOV · 500MB max</p>
+            <input ref={inputRef} type="file" multiple accept="image/*,video/*,.heic,.heif" className="hidden" onChange={e => void handleFiles(e.target.files)} />
           </div>
         )}
 
+        {files.length > 0 && (
+          <div className="mt-4 space-y-1.5">
+            {files.map((f, idx) => {
+              const prog = fileProgress[idx];
+              const state: FileUploadState = prog?.state ?? 'idle';
+              const percent = prog?.percent ?? 0;
+              const isImg = f.type.startsWith('image');
+              const isVid = f.type.startsWith('video');
+
+              return (
+                <div key={`${f.name}-${idx}`} className={`flex items-center gap-3 px-3 py-2.5 border transition-colors ${
+                  state === 'error' ? 'border-vault-danger/30 bg-vault-danger/5' :
+                  state === 'done' ? 'border-vault-success/20' :
+                  'border-vault-border'
+                }`}>
+                  {/* Thumbnail / type icon */}
+                  <div className="w-9 h-9 bg-vault-elevated flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    {isImg ? <ImageThumbPreview file={f} /> : isVid ? <VideoThumbPreview file={f} /> : <FileImage size={14} className="text-vault-muted" />}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-vault-text truncate">{f.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {state === 'idle' && (
+                        <p className="text-[10px] text-vault-muted">{formatBytes(f.size)}</p>
+                      )}
+                      {state === 'uploading' && (
+                        <p className="text-[10px] text-vault-muted font-mono">
+                          {formatBytes(prog.bytesLoaded)} / {formatBytes(prog.bytesTotal || f.size)} · {formatSpeed(prog.speed)}
+                        </p>
+                      )}
+                      {state === 'done' && (
+                        <p className="text-[10px] text-vault-muted">{formatBytes(f.size)} · done</p>
+                      )}
+                      {state === 'error' && (
+                        <p className="text-[10px] text-vault-danger truncate">{prog.errorMsg || 'Failed'}</p>
+                      )}
+                    </div>
+                    {state === 'uploading' && (
+                      <div className="mt-1.5 h-0.5 bg-vault-border overflow-hidden">
+                        <div
+                          className="h-full bg-vault-accent transition-all duration-200"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    )}
+                    {state === 'done' && (
+                      <div className="mt-1.5 h-0.5 bg-vault-success/30">
+                        <div className="h-full bg-vault-success w-full" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* State icon */}
+                  <div className="w-7 h-7 flex items-center justify-center flex-shrink-0">
+                    {state === 'idle' && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setFiles(prev => prev.filter((_, i) => i !== idx)); }}
+                        className="w-full h-full flex items-center justify-center text-vault-muted hover:text-vault-text transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                    {state === 'uploading' && (
+                      <div className="w-4 h-4 border-2 border-vault-accent border-t-transparent rounded-full animate-spin" />
+                    )}
+                    {state === 'done' && <Check size={14} className="text-vault-success" />}
+                    {state === 'error' && (
+                      <button
+                        onClick={() => {
+                          setFileProgress(prev => { const n=[...prev]; if(n[idx]) n[idx]={...n[idx], state:'idle', percent:0}; return n; });
+                        }}
+                        className="text-vault-danger hover:opacity-70 transition-opacity"
+                        title="Retry"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {uploadError && !uploading && (
+          <p className="mt-3 text-xs text-vault-danger text-center">{uploadError}</p>
+        )}
+
         <div className="mt-auto pt-5 flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-vault-border text-vault-text text-sm hover:bg-vault-elevated transition-colors">
+          <button onClick={onClose} disabled={uploading} className="flex-1 py-2.5 border border-vault-border text-vault-text text-sm hover:bg-vault-elevated transition-colors disabled:opacity-30">
             Cancel
           </button>
           <button
@@ -620,7 +931,7 @@ function UploadView({ onClose, onUpload, initialFiles = [] }: { onClose: () => v
             disabled={files.length === 0 || uploading || converting}
             className="flex-1 py-2.5 bg-vault-accent text-vault-bg text-sm font-medium disabled:opacity-30 hover:opacity-90 transition-opacity"
           >
-            {converting ? 'Converting...' : uploading ? 'Uploading...' : `Upload ${files.length}`}
+            {converting ? 'Converting...' : uploading ? `Uploading ${globalPercent}%` : `Upload ${files.length} file${files.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       </div>
