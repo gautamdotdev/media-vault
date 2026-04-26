@@ -3,11 +3,11 @@ import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FileImage, FileVideo, Play, Star, Grid3X3, List, Search,
-  ArrowLeft, XCircle, RefreshCw
+  XCircle, RefreshCw
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { MediaPreview } from './MediaPreview';
-import type { Vault, MediaItem, FilterOption, SortOption, ViewMode } from './types';
+import type { Vault, MediaItem, FilterOption, ViewMode } from './types';
 
 export function SharedVaultView() {
   const { shareCode } = useParams<{ shareCode: string }>();
@@ -16,7 +16,6 @@ export function SharedVaultView() {
   const [error, setError] = useState<string | null>(null);
   
   const [filter, setFilter] = useState<FilterOption>('all');
-  const [sort] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -226,7 +225,7 @@ function SharedVaultImage({ media }: { media: MediaItem }) {
   return <img src={displayUrl} alt={media.name} className="w-full h-full object-cover" loading="lazy" />;
 }
 
-function SharedVideoThumb({ media }: { media: MediaItem }) {
+function SharedVideoThumb({ media: _media }: { media: MediaItem }) {
   // For shared view, just show a placeholder or try to extract if possible
   // Keeping it simple for now
   return <div className="w-full h-full flex items-center justify-center"><FileVideo size={24} className="text-vault-muted" /></div>;
