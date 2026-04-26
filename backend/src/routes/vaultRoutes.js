@@ -11,6 +11,8 @@ import {
   toggleStar,
   updateVault,
   uploadMedia,
+  updateShareSettings,
+  getSharedVault,
 } from "../controllers/vaultController.js";
 
 const router = express.Router();
@@ -29,5 +31,7 @@ router.patch("/vaults/:vaultId/media/:mediaId/star", toggleStar);
 router.delete("/vaults/:vaultId/media", deleteMedia);
 router.delete("/vaults/:vaultId/all-media", clearAllMedia);
 router.delete("/vaults/:vaultId", destroyVault);
+router.post("/vaults/:vaultId/share", updateShareSettings);
+router.get("/public/vault/:shareCode", getSharedVault);
 
 export { router as vaultRoutes };

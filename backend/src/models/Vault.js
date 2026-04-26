@@ -22,6 +22,12 @@ const vaultSchema = new mongoose.Schema(
     password: { type: String, required: true },
     themeColor: { type: String, default: "#ffffff" },
     media: [mediaSchema],
+    shareCode: { type: String, unique: true, sparse: true, index: true },
+    shareEnabled: { type: Boolean, default: false },
+    shareConfig: {
+      type: { type: String, enum: ["full", "selected"], default: "full" },
+      sharedIds: [{ type: String }],
+    },
   },
   { timestamps: true, bufferCommands: false },
 );

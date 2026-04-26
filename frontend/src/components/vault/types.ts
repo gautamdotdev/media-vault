@@ -18,6 +18,12 @@ export interface Vault {
   password: string;
   media: MediaItem[];
   themeColor: string;
+  shareCode?: string;
+  shareEnabled?: boolean;
+  shareConfig?: {
+    type: 'full' | 'selected';
+    sharedIds: string[];
+  };
 }
 
 export type VaultMap = Record<string, Vault>;

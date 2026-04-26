@@ -145,4 +145,19 @@ export const api = {
   async deleteVault(vaultId: string): Promise<void> {
     await request(`/api/vaults/${vaultId}`, { method: "DELETE" });
   },
+
+  async updateShareSettings(
+    vaultId: string,
+    payload: { shareEnabled: boolean; shareConfig?: { type: "full" | "selected"; sharedIds: string[] } },
+  ): Promise<{ shareCode: string; shareEnabled: boolean; shareConfig: any }> {
+    return request(`/api/vaults/${vaultId}/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getSharedVault(shareCode: string): Promise<{ vault: Vault }> {
+    return request(`/api/public/vault/${shareCode}`);
+  },
 };

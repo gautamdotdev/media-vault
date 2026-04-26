@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Search, Upload, Star, Play, X, Grid3X3, List,
   CheckSquare, Square, FileImage, FileVideo, Check, MoreHorizontal,
-  Copy, Eye, EyeOff, RefreshCw,
+  Copy, Eye, EyeOff, RefreshCw, Share2,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { api } from '@/lib/api';
 import { useToast } from './Toast';
 import { MediaPreview } from './MediaPreview';
 import type { Vault, FilterOption, SortOption, ViewMode, MediaItem } from './types';
@@ -244,6 +245,7 @@ export function VaultInteriorView({
   const [shareView, setShareView] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
+  const [isPickingForShare, setIsPickingForShare] = useState(false);
   const { mediaId } = useParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -364,7 +366,28 @@ export function VaultInteriorView({
   }
 
   if (shareView) {
-    return <ShareView vaultId={vaultId} vault={vault} onClose={() => setShareView(false)} />;
+    return (
+      <ShareView 
+        vaultId={vaultId} 
+        vault={vault} 
+        onClose={() => setShareView(false)} 
+        onUpdateShare={async (payload) => {
+          const res = await api.updateShareSettings(vaultId, payload);
+          onUpdateVault({
+            ...vault,
+            shareCode: res.shareCode,
+            shareEnabled: res.shareEnabled,
+            shareConfig: res.shareConfig
+          });
+        }}
+        selectedIds={Array.from(selected)}
+        onStartSelection={() => {
+          setSelectMode(true);
+          setIsPickingForShare(true);
+          showToast('info', 'Select media to share, then click Done Selecting');
+        }}
+      />
+    );
   }
 
   if (previewIndex !== null && filteredMedia[previewIndex]) {
@@ -428,6 +451,9 @@ export function VaultInteriorView({
             </button>
             <button onClick={() => setUploadView(true)} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
               <Upload size={18} />
+            </button>
+            <button onClick={() => setShareView(true)} title="Share access" className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
+              <Share2 size={18} />
             </button>
             <button
               onClick={handleRefresh}
@@ -606,19 +632,46 @@ export function VaultInteriorView({
       <AnimatePresence>
         {selectMode && selected.size > 0 && (
           <motion.div
-            initial={{ y: 60 }}
+            initial={{ y: 100 }}
             animate={{ y: 0 }}
-            exit={{ y: 60 }}
-            className="fixed bottom-0 left-0 right-0 z-40 bg-vault-surface border-t border-vault-border px-4 py-3 flex items-center justify-between safe-bottom"
+            exit={{ y: 100 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-vault-surface border border-vault-border px-6 py-3 shadow-2xl flex items-center gap-6 min-w-[280px]"
           >
-            <span className="text-xs text-vault-muted">{selected.size} selected</span>
-            <div className="flex gap-2">
-              <button onClick={() => { selected.forEach(id => { void toggleStar(id); }); setSelected(new Set()); }} className="px-3 py-1.5 border border-vault-border text-vault-text text-xs hover:bg-vault-elevated transition-colors">
-                Star
-              </button>
-              <button onClick={() => setConfirmBulkDelete(true)} className="px-3 py-1.5 border border-vault-danger/30 text-vault-danger text-xs hover:bg-vault-danger/10 transition-colors">
-                Remove
-              </button>
+            <span className="text-xs font-bold text-vault-accent whitespace-nowrap">{selected.size} selected</span>
+            <div className="h-4 w-px bg-vault-border" />
+            <div className="flex items-center gap-4">
+              {isPickingForShare ? (
+                <button 
+                  onClick={() => { setShareView(true); setSelectMode(false); setIsPickingForShare(false); }}
+                  className="px-4 py-2 bg-vault-accent text-vault-bg text-xs font-bold hover:opacity-90 transition-opacity uppercase tracking-wider"
+                >
+                  Done Selecting
+                </button>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => { selected.forEach(id => { void toggleStar(id); }); setSelected(new Set()); }}
+                    className="p-1.5 text-vault-text hover:text-vault-accent transition-colors"
+                    title="Star selected"
+                  >
+                    <Star size={18} className={Array.from(selected).every(id => vault.media.find(m => m.id === id)?.starred) ? 'fill-vault-accent text-vault-accent' : ''} />
+                  </button>
+                  <button 
+                    onClick={() => { setShareView(true); }}
+                    className="p-1.5 text-vault-text hover:text-vault-accent transition-colors"
+                    title="Share selected"
+                  >
+                    <Share2 size={18} />
+                  </button>
+                  <button 
+                    onClick={() => setConfirmBulkDelete(true)}
+                    className="p-1.5 text-vault-danger hover:opacity-70 transition-opacity"
+                    title="Delete selected"
+                  >
+                    <X size={18} />
+                  </button>
+                </>
+              )}
             </div>
           </motion.div>
         )}
@@ -1034,9 +1087,62 @@ function VaultSettingsView({ vault, onUpdate, onClose, onDeleteAll, onDestroyVau
 }
 
 /* ============ Share ============ */
-function ShareView({ vaultId, vault, onClose }: { vaultId: string; vault: Vault; onClose: () => void }) {
+function ShareView({ 
+  vaultId, 
+  vault, 
+  onClose, 
+  onUpdateShare,
+  selectedIds,
+  onStartSelection
+}: { 
+  vaultId: string; 
+  vault: Vault; 
+  onClose: () => void;
+  onUpdateShare: (payload: any) => Promise<void>;
+  selectedIds: string[];
+  onStartSelection?: () => void;
+}) {
   const [showPw, setShowPw] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const [shareEnabled, setShareEnabled] = useState(vault.shareEnabled || false);
+  const [shareType, setShareType] = useState<'full' | 'selected'>(vault.shareConfig?.type || 'full');
+  const [sharedIds, setSharedIds] = useState<string[]>(vault.shareConfig?.sharedIds || []);
+
+  const publicLink = vault.shareCode ? `${window.location.origin}/shared/${vault.shareCode}` : '';
+
+  const handleToggleShare = async (enabled: boolean) => {
+    setLoading(true);
+    try {
+      await onUpdateShare({ 
+        shareEnabled: enabled,
+        shareConfig: { type: shareType, sharedIds: sharedIds }
+      });
+      setShareEnabled(enabled);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateConfig = async (type: 'full' | 'selected', ids: string[]) => {
+    setLoading(true);
+    try {
+      await onUpdateShare({ 
+        shareEnabled: shareEnabled,
+        shareConfig: { type, sharedIds: ids }
+      });
+      setShareType(type);
+      setSharedIds(ids);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const useSelected = () => {
+    handleUpdateConfig('selected', selectedIds);
+  };
 
   return (
     <div className="flex flex-col h-screen bg-vault-bg">
@@ -1044,31 +1150,152 @@ function ShareView({ vaultId, vault, onClose }: { vaultId: string; vault: Vault;
         <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-vault-text hover:bg-vault-elevated transition-colors">
           <ArrowLeft size={20} />
         </button>
-        <span className="text-sm font-medium text-vault-text">Share</span>
+        <span className="text-sm font-medium text-vault-text">Share Access</span>
       </div>
+
       <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8">
-        <div className="max-w-sm mx-auto space-y-5">
-          <div>
-            <label className="text-xs font-medium text-vault-muted mb-1.5 block uppercase tracking-wider">Vault ID</label>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 px-3 py-2.5 bg-vault-surface border border-vault-border font-mono text-sm text-vault-text">{vaultId}</code>
-              <button onClick={() => { navigator.clipboard.writeText(vaultId); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="px-3 py-2.5 border border-vault-border text-vault-muted hover:text-vault-text transition-colors">
-                {copied ? <Check size={16} className="text-vault-success" /> : <Copy size={16} />}
+        <div className="max-w-sm mx-auto space-y-8">
+          
+          {/* Section 1: Full Access (ID + PW) */}
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-bold text-vault-muted uppercase tracking-[0.2em]">Full Access Credentials</h3>
+            <div className="space-y-4 p-4 bg-vault-elevated/50 border border-vault-border">
+              <div>
+                <label className="text-[10px] text-vault-muted mb-1 block uppercase">Vault ID</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono text-vault-text truncate">{vaultId}</code>
+                  <button 
+                    onClick={() => { navigator.clipboard.writeText(vaultId); setCopiedId(true); setTimeout(() => setCopiedId(false), 2000); }} 
+                    className="p-2 text-vault-muted hover:text-vault-text transition-colors"
+                  >
+                    {copiedId ? <Check size={14} className="text-vault-success" /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] text-vault-muted mb-1 block uppercase">Password</label>
+                <div className="flex items-center gap-2">
+                  <code className={`flex-1 text-xs font-mono text-vault-text truncate ${!showPw ? 'blur-sm select-none' : ''}`}>
+                    {vault.password}
+                  </code>
+                  <button onClick={() => setShowPw(!showPw)} className="p-2 text-vault-muted hover:text-vault-text transition-colors">
+                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10px] text-vault-muted leading-relaxed">Give these to someone you trust with FULL control over the vault.</p>
+            </div>
+          </section>
+
+          {/* Section 2: Public Read-Only Access */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-vault-muted uppercase tracking-[0.2em]">Public Share Link</h3>
+              <button 
+                disabled={loading}
+                onClick={() => handleToggleShare(!shareEnabled)}
+                className={`text-[10px] px-3 py-1 font-bold uppercase transition-colors ${
+                  shareEnabled ? 'text-vault-success bg-vault-success/10 border border-vault-success/20' : 'text-vault-muted border border-vault-border'
+                }`}
+              >
+                {shareEnabled ? 'Enabled' : 'Disabled'}
               </button>
             </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-vault-muted mb-1.5 block uppercase tracking-wider">Password</label>
-            <div className="flex items-center gap-2">
-              <code className={`flex-1 px-3 py-2.5 bg-vault-surface border border-vault-border font-mono text-sm text-vault-text ${!showPw ? 'blur-sm select-none' : ''}`}>
-                {vault.password}
-              </code>
-              <button onClick={() => setShowPw(!showPw)} className="px-3 py-2.5 border border-vault-border text-vault-muted hover:text-vault-text transition-colors">
-                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-          <p className="text-xs text-vault-muted">Share the Vault ID and password to give someone access.</p>
+
+            {shareEnabled ? (
+              <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="p-4 bg-vault-elevated/50 border border-vault-border space-y-4">
+                  <div>
+                    <label className="text-[10px] text-vault-muted mb-1 block uppercase">Shareable Link (Read-Only)</label>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        readOnly 
+                        value={publicLink} 
+                        className="flex-1 bg-transparent border-none text-xs text-vault-text focus:outline-none truncate" 
+                      />
+                      <button 
+                        onClick={() => { navigator.clipboard.writeText(publicLink); setCopiedLink(true); setTimeout(() => setCopiedLink(false), 2000); }} 
+                        className="p-2 text-vault-muted hover:text-vault-text transition-colors"
+                      >
+                        {copiedLink ? <Check size={14} className="text-vault-success" /> : <Copy size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-vault-border space-y-4">
+                    <div>
+                      <label className="text-[10px] text-vault-muted mb-2 block uppercase">What to share?</label>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleUpdateConfig('full', [])}
+                          className={`flex-1 py-2 text-[10px] font-bold uppercase border transition-colors ${
+                            shareType === 'full' ? 'bg-vault-text text-vault-bg border-vault-text' : 'border-vault-border text-vault-muted hover:border-vault-muted'
+                          }`}
+                        >
+                          Full Vault
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateConfig('selected', sharedIds)}
+                          className={`flex-1 py-2 text-[10px] font-bold uppercase border transition-colors ${
+                            shareType === 'selected' ? 'bg-vault-text text-vault-bg border-vault-text' : 'border-vault-border text-vault-muted hover:border-vault-muted'
+                          }`}
+                        >
+                          Selected Only
+                        </button>
+                      </div>
+                    </div>
+
+                    {shareType === 'selected' && (
+                      <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] text-vault-muted">{sharedIds.length} items shared</p>
+                          <div className="flex gap-3">
+                            <button 
+                              onClick={() => {
+                                // Close share, enter select mode
+                                onClose();
+                                if (typeof window !== 'undefined') {
+                                  // We can't directly trigger state in parent easily without props, 
+                                  // but we can pass a function or just explain it.
+                                  // Let's assume we want to make it seamless.
+                                  // I'll add a prop 'onStartSelection' to ShareView.
+                                  onStartSelection?.();
+                                }
+                              }}
+                              className="text-[10px] text-vault-accent hover:underline font-bold uppercase"
+                            >
+                              Pick Media
+                            </button>
+                            {selectedIds.length > 0 && (
+                              <button 
+                                onClick={useSelected}
+                                className="text-[10px] text-vault-success hover:underline font-bold uppercase"
+                              >
+                                Sync ({selectedIds.length})
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-[9px] text-vault-muted leading-tight">
+                          Only specific items you choose will be visible via this link. 
+                          Click "Pick Media" to select items in your vault, then return here and click "Sync".
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[10px] text-vault-muted italic leading-relaxed">
+                  Anyone with this link can view shared media. They cannot delete, upload, or star items.
+                </p>
+              </div>
+            ) : (
+              <div className="p-8 border border-dashed border-vault-border flex flex-col items-center justify-center gap-3 opacity-50">
+                <Share2 size={24} className="text-vault-muted" />
+                <p className="text-[10px] text-vault-muted uppercase tracking-widest text-center">Sharing is currently turned off</p>
+              </div>
+            )}
+          </section>
+
         </div>
       </div>
     </div>

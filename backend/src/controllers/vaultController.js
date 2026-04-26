@@ -3,7 +3,13 @@ import {
   deleteCloudinaryAsset,
   uploadFileToCloudinary,
 } from "../services/cloudinaryService.js";
-import { makeVaultId, normalizeVault, toVaultMap } from "../utils/vault.js";
+import {
+  makeVaultId,
+  normalizeVault,
+  toVaultMap,
+  makeShareCode,
+  normalizeSharedVault,
+} from "../utils/vault.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 // @desc    Get health status
@@ -267,4 +273,56 @@ export const destroyVault = asyncHandler(async (req, res) => {
 
   await vault.deleteOne();
   res.json({ success: true, message: "Vault destroyed" });
+});
+
+// @desc    Update vault sharing settings
+// @route   POST /api/vaults/:vaultId/share
+export const updateShareSettings = asyncHandler(async (req, res) => {
+  const { vaultId } = req.params;
+  const { shareEnabled, shareConfig } = req.body;
+
+  const vault = await Vault.findOne({ vaultId });
+  if (!vault) {
+    res.status(404);
+    throw new Error("Vault not found");
+  }
+
+  // Generate share code if enabling for the first time and it doesn't exist
+  if (shareEnabled && !vault.shareCode) {
+    let code = makeShareCode();
+    while (await Vault.exists({ shareCode: code })) {
+      code = makeShareCode();
+    }
+    vault.shareCode = code;
+  }
+
+  vault.shareEnabled = !!shareEnabled;
+  if (shareConfig) {
+    vault.shareConfig = shareConfig;
+  }
+
+  await vault.save();
+  res.json({
+    success: true,
+    shareCode: vault.shareCode,
+    shareEnabled: vault.shareEnabled,
+    shareConfig: vault.shareConfig,
+  });
+});
+
+// @desc    Get shared vault media (public)
+// @route   GET /api/public/vault/:shareCode
+export const getSharedVault = asyncHandler(async (req, res) => {
+  const { shareCode } = req.params;
+  const vault = await Vault.findOne({ shareCode, shareEnabled: true });
+
+  if (!vault) {
+    res.status(404);
+    throw new Error("Shared vault not found or link expired");
+  }
+
+  res.json({
+    success: true,
+    vault: normalizeSharedVault(vault),
+  });
 });

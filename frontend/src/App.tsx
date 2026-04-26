@@ -5,6 +5,7 @@ import { HomeView } from '@/components/vault/HomeView';
 import { CreateVaultView } from '@/components/vault/CreateVaultView';
 import { AccessVaultView } from '@/components/vault/AccessVaultView';
 import { VaultInteriorView } from '@/components/vault/VaultInteriorView';
+import { SharedVaultView } from '@/components/vault/SharedVaultView';
 import { ToastProvider } from '@/components/vault/Toast';
 import { api } from '@/lib/api';
 import type { VaultMap } from '@/components/vault/types';
@@ -175,6 +176,12 @@ export default function App() {
               }} />}>
                 <Route path="m/:mediaId" element={<div />} />
               </Route>
+
+              <Route path="/shared/:shareCode" element={
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="h-full">
+                  <SharedVaultView />
+                </motion.div>
+              } />
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
